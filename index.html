@@ -1465,9 +1465,11 @@ function handleCSVImport(file,dataset){
       if(dataset==='cps'){
         rows=_csvToRows(text,_CPS_KEYS,_CPS_TEXT,3);
         DB.cps.rows=rows;
+        DSCONF.cps.rows=rows;
       } else {
         rows=_csvToRows(text,_SCALE_KEYS,_SCALE_TEXT,2);
         DB.scaling.rows=rows;
+        DSCONF.scaling.rows=rows;
       }
       // update "Data updated" date label to today
       var now=new Date();
