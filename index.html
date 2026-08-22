@@ -242,9 +242,18 @@ tr.headrow th .lbl:hover{color:var(--accent)}
 .muted-cell{color:#cbd5e1}
 .tag{display:inline-block;padding:2px 7px;border-radius:99px;font-size:10px;font-weight:700}
 .tag.Sketch{background:#e0f2fe;color:#0369a1}.tag.GenAI{background:#ede9fe;color:#6d28d9}.tag.MotionAI{background:#fef3c7;color:#b45309}
+
+/* data-fetch loading bar */
+#csvLoadBar{position:fixed;top:0;left:0;right:0;z-index:9999;height:3px;background:linear-gradient(90deg,#6d28d9,#2563eb,#059669);background-size:200% 100%;animation:csvSlide 1.2s linear infinite;display:none}
+#csvLoadBar.active{display:block}
+@keyframes csvSlide{0%{background-position:200% 0}100%{background-position:-200% 0}}
+/* csv status toast */
+#csvStatusToast{position:fixed;bottom:22px;right:22px;z-index:9999;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:700;color:#fff;box-shadow:0 4px 18px rgba(0,0,0,.22);opacity:0;transition:opacity .3s;pointer-events:none}
 </style>
 </head>
 <body>
+<div id="csvLoadBar"></div>
+<div id="csvStatusToast"></div>
 <header class="top">
   <div class="hdr-main">
     <div class="logo">PF</div>
@@ -332,10 +341,6 @@ tr.headrow th .lbl:hover{color:var(--accent)}
     <button class="btn" id="freezeBtn" title="Select a column (click any cell in it), then click to freeze that column and everything to its left. Click again to unfreeze.">🧊 Freeze</button>
     <button class="btn" id="colBtn">⚙ Columns</button>
     <button class="btn primary" id="exportBtn">⬇ Export CSV</button>
-    <button class="btn" id="importCpsBtn" title="Import CPS Master Sheet CSV (skip 3 header rows, 74 columns)" style="background:#f5f3ff;border-color:#6d28d9;color:#6d28d9;font-weight:700">⬆ Import CPS CSV</button>
-    <button class="btn" id="importScaleBtn" title="Import New Scaling Ads CSV (skip 2 header rows, 84 columns)" style="background:#ecfdf5;border-color:#059669;color:#059669;font-weight:700">⬆ Import Scaling CSV</button>
-    <input type="file" id="importCpsInput" accept=".csv" style="display:none"/>
-    <input type="file" id="importScaleInput" accept=".csv" style="display:none"/>
   </div>
   <div class="ifltr-bar" id="installFiltersBlock">
     <span class="ifltr-title">Install Filters</span>
@@ -1362,7 +1367,7 @@ function loadDataset(key){
 
 /* ---------- init ---------- */
 
-/* ===== CLIENT-SIDE CSV IMPORT (injected) ===== */
+/* ===== CSV PARSER + AUTO-FETCH FROM data/ FOLDER ===== */
 var _CPS_KEYS=['adset_name','show_name','base_asset','selected_promos','video_type',
   'adset_id','show_id','start_date','end_date','delivery',
   'meta_installs','cpi_usd','cpi_inr','activation','vc25','vc50','vc75','vc95','cpm','cti','octr',
@@ -1438,54 +1443,55 @@ function _csvToRows(text,keys,textSet,skip){
   return rows;
 }
 
-function _importToast(msg,ok){
-  var t=document.getElementById('_importToast');
-  if(!t){
-    t=document.createElement('div');
-    t.id='_importToast';
-    t.style.cssText='position:fixed;bottom:28px;right:28px;z-index:9999;padding:13px 22px;border-radius:12px;'
-      +'font-size:13.5px;font-weight:700;box-shadow:0 6px 24px rgba(0,0,0,.22);transition:opacity .35s;pointer-events:none';
-    document.body.appendChild(t);
-  }
+function _showCsvToast(msg,ok){
+  var t=document.getElementById('csvStatusToast');
+  if(!t)return;
   t.textContent=msg;
-  t.style.background=ok?'#059669':'#dc2626';
-  t.style.color='#fff';
+  t.style.background=ok?'#059669':'#b45309';
   t.style.opacity='1';
   clearTimeout(t._tid);
-  t._tid=setTimeout(function(){t.style.opacity='0';},4000);
+  t._tid=setTimeout(function(){t.style.opacity='0';},5000);
 }
 
-function handleCSVImport(file,dataset){
-  var reader=new FileReader();
-  reader.onerror=function(){_importToast('✗ Could not read file',false);};
-  reader.onload=function(e){
-    try{
-      var text=e.target.result;
-      var rows;
-      if(dataset==='cps'){
-        rows=_csvToRows(text,_CPS_KEYS,_CPS_TEXT,3);
-        DB.cps.rows=rows;
-        DSCONF.cps.rows=rows;
-      } else {
-        rows=_csvToRows(text,_SCALE_KEYS,_SCALE_TEXT,2);
-        DB.scaling.rows=rows;
-        DSCONF.scaling.rows=rows;
-      }
-      // update "Data updated" date label to today
-      var now=new Date();
-      var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      var ds=now.getDate()+' '+mo[now.getMonth()]+' '+now.getFullYear();
-      var ud=document.querySelector('.udate');if(ud)ud.textContent=ds;
-      // reload the affected dataset
-      loadDataset(dataset);
-      _importToast('✓ '+rows.length+' rows imported from “'+file.name+'”',true);
-    }catch(err){
-      _importToast('✗ Import failed: '+err.message,false);
-    }
-  };
-  reader.readAsText(file,'utf-8');
+/* Auto-fetch CSVs from data/ folder on every page load */
+function _loadDataFromFolder(){
+  var bar=document.getElementById('csvLoadBar');
+  if(bar)bar.classList.add('active');
+
+  var CPS_URL   = './data/CPS%20New%20Sheet%20-%20Master%20Sheet%20(CPS).csv';
+  var SCALE_URL = './data/CPS%20New%20Sheet%20-%20New%20Scalling%20Ads%20.csv';
+
+  function fetchCSV(url){
+    return fetch(url,{cache:'no-cache'}).then(function(r){
+      if(!r.ok) throw new Error(r.status+' '+r.statusText+' ('+url+')');
+      return r.text();
+    });
+  }
+
+  Promise.all([fetchCSV(CPS_URL), fetchCSV(SCALE_URL)])
+    .then(function(texts){
+      var cpsRows   = _csvToRows(texts[0],_CPS_KEYS,_CPS_TEXT,3);
+      var scaleRows = _csvToRows(texts[1],_SCALE_KEYS,_SCALE_TEXT,2);
+
+      /* update both the raw DB and DSCONF (which loadDataset reads) */
+      DB.cps.rows         = cpsRows;
+      DSCONF.cps.rows     = cpsRows;
+      DB.scaling.rows     = scaleRows;
+      DSCONF.scaling.rows = scaleRows;
+
+      /* reload whichever tab is active */
+      loadDataset(DS ? DS.key : 'cps');
+
+      if(bar)bar.classList.remove('active');
+      _showCsvToast('✓ Data refreshed — CPS: '+cpsRows.length+' rows · Scaling: '+scaleRows.length+' rows', true);
+    })
+    .catch(function(err){
+      if(bar)bar.classList.remove('active');
+      console.warn('[CSV fetch] Could not load data files, showing embedded data.', err.message);
+      /* silently fall back — embedded 21-Aug data already loaded */
+    });
 }
-/* ============================================= */
+/* ====================================================== */
 
 (function init(){
   document.getElementById('search').oninput=applyBody;
@@ -1500,17 +1506,6 @@ function handleCSVImport(file,dataset){
   const colBtn=document.getElementById('colBtn');
   colBtn.onclick=()=>{ const w=document.getElementById('chipwrap'); w.classList.toggle('open'); colBtn.classList.toggle('primary', w.classList.contains('open')); };
   document.getElementById('exportBtn').onclick=exportCSV;
-  // Import CSV wiring
-  (function(){
-    var cBtn=document.getElementById('importCpsBtn');
-    var sBtn=document.getElementById('importScaleBtn');
-    var cInp=document.getElementById('importCpsInput');
-    var sInp=document.getElementById('importScaleInput');
-    if(cBtn)cBtn.onclick=function(){cInp.value='';cInp.click();};
-    if(sBtn)sBtn.onclick=function(){sInp.value='';sInp.click();};
-    if(cInp)cInp.onchange=function(ev){if(ev.target.files[0])handleCSVImport(ev.target.files[0],'cps');};
-    if(sInp)sInp.onchange=function(ev){if(ev.target.files[0])handleCSVImport(ev.target.files[0],'scaling');};
-  })();
   document.getElementById('freezeBtn').onclick=toggleFreeze;
   document.getElementById('clearFilters').onclick=()=>{
     colFilters={};
@@ -1560,6 +1555,7 @@ function handleCSVImport(file,dataset){
   document.getElementById('insX').onclick=closeInsights;
 
   loadDataset('cps');
+  _loadDataFromFolder();
 })();
 </script>
 </body>
