@@ -1,0 +1,43 @@
+name: Update Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'data/CPS New Sheet - Master Sheet (CPS).csv'
+      - 'data/CPS New Sheet - New Scalling Ads .csv'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-dashboard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run conversion
+        run: python scripts/convert.py
+
+      - name: Commit and push updated dashboard
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --staged --quiet; then
+            echo "index.html unchanged — nothing to commit"
+          else
+            DAY=$(python3 -c "from datetime import datetime; d=datetime.utcnow(); print(f'{d.day} {d.strftime(\"%b\")} {d.year}')")
+            git commit -m "chore: update dashboard data ${DAY}"
+            git push
+          fi
