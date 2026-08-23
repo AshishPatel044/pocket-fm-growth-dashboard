@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Auto-update index.html with new CSV data from the data/ folder."""
 
-import csv, json, re, sys
-from datetime import datetime
+import csv, glob, json, sys
 from pathlib import Path
 
-CSV_CPS   = Path('data/CPS New Sheet - Master Sheet (CPS).csv')
-CSV_SCALE = Path('data/CPS New Sheet - New Scalling Ads .csv')
 HTML_PATH = Path('index.html')
+
+# Use glob so filenames with or without trailing space both work
+def _find_csv(pattern):
+    matches = glob.glob(pattern)
+    if not matches:
+        print(f'ERROR: no file matched {pattern!r}', file=sys.stderr)
+        sys.exit(1)
+    return matches[0]
 
 CPS_KEYS = [
     'adset_name','show_name','base_asset','selected_promos','video_type',
@@ -86,10 +91,14 @@ def csv_to_rows(path, keys, text_cols, skip):
 
 
 def main():
-    for p in (CSV_CPS, CSV_SCALE, HTML_PATH):
-        if not p.exists():
-            print(f'ERROR: {p} not found', file=sys.stderr)
-            sys.exit(1)
+    if not HTML_PATH.exists():
+        print('ERROR: index.html not found', file=sys.stderr)
+        sys.exit(1)
+
+    csv_cps   = _find_csv('data/CPS New Sheet - Master Sheet (CPS)*.csv')
+    csv_scale = _find_csv('data/CPS New Sheet - New Scalling Ads*.csv')
+    print(f'CPS file:   {csv_cps}')
+    print(f'Scale file: {csv_scale}')
 
     with open(HTML_PATH, 'r', encoding='utf-8') as f:
         lines = f.readlines()
@@ -102,13 +111,12 @@ def main():
         print('ERROR: could not find "const DB = {" line in index.html', file=sys.stderr)
         sys.exit(1)
 
-    db_str = lines[db_idx].strip().rstrip(';')
-    db_str = db_str[len('const DB = '):]
+    db_str = lines[db_idx].strip().rstrip(';')[len('const DB = '):]
     db = json.loads(db_str)
 
     # Replace rows only — columns are never touched
-    cps_rows   = csv_to_rows(CSV_CPS,   CPS_KEYS,   CPS_TEXT,   skip=3)
-    scale_rows = csv_to_rows(CSV_SCALE, SCALE_KEYS, SCALE_TEXT, skip=2)
+    cps_rows   = csv_to_rows(csv_cps,   CPS_KEYS,   CPS_TEXT,   skip=3)
+    scale_rows = csv_to_rows(csv_scale, SCALE_KEYS, SCALE_TEXT, skip=2)
     db['cps']['rows']     = cps_rows
     db['scaling']['rows'] = scale_rows
 
@@ -118,15 +126,10 @@ def main():
         + ';\n'
     )
 
-    d = datetime.utcnow()
-    today = f"{d.day} {d.strftime('%b')} {d.year}"
-    pattern = re.compile(r'(<span class="udate">)[^<]*(</span>)')
-    lines = [pattern.sub(rf'\g<1>{today}\2', l) for l in lines]
-
     with open(HTML_PATH, 'w', encoding='utf-8') as f:
         f.writelines(lines)
 
-    print(f'Done: {len(cps_rows)} CPS rows, {len(scale_rows)} Scaling rows. Date: {today}')
+    print(f'Done: {len(cps_rows)} CPS rows, {len(scale_rows)} Scaling rows.')
 
 
 if __name__ == '__main__':
