@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'data/CPS New Sheet - Master Sheet (CPS).csv'
-      - 'data/CPS New Sheet - New Scalling Ads .csv'
+      - 'data/CPS New Sheet - Master Sheet (CPS)*.csv'
+      - 'data/CPS New Sheet - New Scalling Ads*.csv'
   workflow_dispatch:
 
 permissions:
@@ -37,7 +37,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "index.html unchanged — nothing to commit"
           else
-            DAY=$(python3 -c "from datetime import datetime; d=datetime.utcnow(); print(f'{d.day} {d.strftime(\"%b\")} {d.year}')")
-            git commit -m "chore: update dashboard data ${DAY}"
+            git commit -m "chore: auto-update dashboard data"
             git push
           fi
